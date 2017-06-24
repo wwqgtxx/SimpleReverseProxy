@@ -14,7 +14,7 @@ import json
 import gevent
 from argparse import ArgumentParser
 from queue import Queue, Empty
-from .encrypt import ciphers, default_cipher_name, tostr, tobytes
+from .encrypt import ciphers, default_cipher_name
 from .utils import logger, SocketHelper, base85_encode, base85_decode, SPLIT_BYTES, PING_BYTES, PONG_BYTES, DATA_BYTES, \
     FINISH_WRITE_SOCKET_BYTES, LEN_DATA_BYTES, LEN_PING_BYTES, LEN_PONG_BYTES, LEN_FINISH_WRITE_SOCKET_BYTES
 
@@ -320,7 +320,7 @@ class ReverseProxyClient(object):
                 # upstream_write_ok_queue.get()
                 # self.server_socket2_write_queue.put((data, data_buffer))
 
-                data = DATA_BYTES + int(socket_uuid, 16).to_bytes(16, 'big')  + data_buffer
+                data = DATA_BYTES + int(socket_uuid, 16).to_bytes(16, 'big') + data_buffer
                 data = self.cipher.encrypt(data)
                 upstream_write_ok_queue.get()
                 self.server_socket2_write_queue.put(data, data_buffer)

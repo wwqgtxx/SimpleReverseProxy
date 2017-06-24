@@ -13,7 +13,7 @@ try:
     from cx_Freeze import setup, Executable
 
     # Dependencies are automatically detected, but it might need fine tuning.
-    build_exe_options = {"packages": ["SimpleReverseProxy"],
+    build_exe_options = {"packages": ["SimpleReverseProxy",'idna'],
                          # "include_files": [],
                          # "excludes": [],
                          # "zip_include_packages": [],

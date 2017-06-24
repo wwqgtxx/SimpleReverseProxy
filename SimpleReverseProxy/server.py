@@ -16,7 +16,7 @@ import gevent
 from argparse import ArgumentParser
 from queue import Queue, Empty
 from gevent.server import StreamServer
-from .encrypt import ciphers, default_cipher_name, tostr, tobytes
+from .encrypt import ciphers, default_cipher_name
 from .utils import logger, SocketHelper, base85_encode, base85_decode, PING_BYTES, PONG_BYTES, DATA_BYTES, \
     FINISH_WRITE_SOCKET_BYTES, LEN_DATA_BYTES, LEN_PING_BYTES, LEN_PONG_BYTES, LEN_FINISH_WRITE_SOCKET_BYTES
 

@@ -16,6 +16,20 @@ logging.basicConfig(level=logging.DEBUG,
 logger = logging.getLogger("SRP")
 
 
+def tobytes(s):
+    if isinstance(s, bytes):
+        return s
+    else:
+        if isinstance(s, str):
+            return s.encode("latin-1")
+        else:
+            return bytes([s])
+
+
+def tostr(bs):
+    return bs.decode("latin-1")
+
+
 def _zlib_base_method(zlib_base_method, input_data, encoding="utf-8", errors='ignore'):
     is_string = isinstance(input_data, str)
     is_bytes = isinstance(input_data, bytes)
@@ -70,7 +84,7 @@ LEN_FINISH_WRITE_SOCKET_BYTES = len(FINISH_WRITE_SOCKET_BYTES)
 class SocketHelper(object):
     def __init__(self, socket: _socket.socket, parse_split_bytes=True):
         self.socket = socket  # type: _socket.socket
-        self.buffer_size = 1024*10
+        self.buffer_size = 1024 * 10
         self.last_buffer = b''
         self.parse_split_bytes = parse_split_bytes
 
