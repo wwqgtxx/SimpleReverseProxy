@@ -7,7 +7,7 @@ from __future__ import (absolute_import, division,
 from Crypto import Random
 from Crypto.Cipher import AES, ChaCha20, Salsa20, ARC4
 from Crypto.Util.py3compat import tobytes, tostr
-from .utils import SPLIT_BYTES, crc32
+from .utils import SPLIT_BYTES, crc32, logger
 import hashlib
 import zlib
 
@@ -72,7 +72,7 @@ class BaseCipher(object):
         data = data[self.IV_LENGTH:]
         if not data:
             return b''
-        data = self.get_cipher(iv).decrypt(data)
+        data = self._decrypt(iv, data)
         # data = zlib.decompress(data)
         return data
 
@@ -82,13 +82,19 @@ class BaseCipher(object):
         iv = random.read(self.IV_LENGTH)
         while SPLIT_BYTES in iv:
             iv = random.read(self.IV_LENGTH)
-        data = self.get_cipher(iv).encrypt(raw_data)
+        data = self._encrypt(iv, raw_data)
         data = iv + data
         crc32_bytes = crc32(data).to_bytes(4, 'big')
         data = crc32_bytes + data
         if SPLIT_BYTES in data:
             return self.encrypt(raw_data)
         return data
+
+    def _decrypt(self, iv, raw_data):
+        return self.get_cipher(iv).decrypt(raw_data)
+
+    def _encrypt(self, iv, raw_data):
+        return self.get_cipher(iv).encrypt(raw_data)
 
     def get_cipher(self, iv):
         pass
@@ -108,9 +114,32 @@ class NoneCipher(BaseCipher):
 class AES256GCMCipher(BaseCipher):
     KEY_LENGTH = 32
     IV_LENGTH = 16
+    MAC_LENGTH = 16
+
+    def _decrypt(self, iv, raw_data):
+        if len(raw_data) < self.MAC_LENGTH:
+            return b''
+        cipher = self.get_cipher(iv)
+        ct = raw_data[self.MAC_LENGTH:]
+        mac = raw_data[:self.MAC_LENGTH]
+        # cipher.update(self.key)
+        try:
+            data = cipher.decrypt_and_verify(ct, mac)
+        except ValueError:
+            data = b''
+        # data = cipher.decrypt(ct)
+        return data
+
+    def _encrypt(self, iv, raw_data):
+        cipher = self.get_cipher(iv)
+        # cipher.update(self.key)
+        ct, mac = cipher.encrypt_and_digest(raw_data)
+        data = mac + ct
+        # data = cipher.encrypt(raw_data)
+        return data
 
     def get_cipher(self, iv):
-        return AES.new(self.key, mode=AES.MODE_GCM, nonce=iv)
+        return AES.new(self.key, mode=AES.MODE_GCM, nonce=iv, mac_len=self.MAC_LENGTH)
 
 
 class AES192GCMCipher(AES256GCMCipher):
