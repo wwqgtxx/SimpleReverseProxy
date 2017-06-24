@@ -13,6 +13,7 @@ import uuid
 import json
 import time
 import gevent
+from argparse import ArgumentParser
 from queue import Queue, Empty
 from gevent.server import StreamServer
 from .encrypt import ciphers, default_cipher_name, tostr, tobytes
@@ -339,7 +340,17 @@ def socket_handle(password, method, socket, address):
 
 
 def server_main(ip="0.0.0.0", port=10086, password="password", method=default_cipher_name):
+    parser = ArgumentParser(description="SimpleReverseProxy Server")
+    parser.add_argument('--ip', type=str, default=ip,
+                        help="set server ip")
+    parser.add_argument('--port', type=int, default=port,
+                        help="set server port")
+    parser.add_argument('--password', type=str, default=password,
+                        help="the password used to connect")
+    parser.add_argument('--method', type=str, default=method,
+                        help="the encrypt method used to connect")
+    args = parser.parse_args()
     logger.info("start server on %s:%d" % (ip, port))
-    server = StreamServer((ip, port), partial(socket_handle, method, password))
+    server = StreamServer((args.ip, args.port), partial(socket_handle, args.method, args.password))
     server.init_socket()
     server.serve_forever()

@@ -12,6 +12,7 @@ import socket as _socket
 import uuid
 import json
 import gevent
+from argparse import ArgumentParser
 from queue import Queue, Empty
 from .encrypt import ciphers, default_cipher_name, tostr, tobytes
 from .utils import logger, SocketHelper, base85_encode, base85_decode, SPLIT_BYTES, PING_BYTES, PONG_BYTES, DATA_BYTES, \
@@ -39,17 +40,33 @@ class ReverseProxyClient(object):
         self.socket_timeout = 30
 
     def do_ping_pong(self):
-        while True:
-            data = PING_BYTES
-            logger.debug("send ping")
-            self.server_socket_helper.write(self.cipher.encrypt(data))
-            data = self.server_socket_helper.read()
-            data = self.cipher.decrypt(data)
-            if data != PONG_BYTES:
-                logger.debug("received:%s" % data)
-                break
-            logger.debug("received pong")
-            gevent.sleep(self.socket_timeout / 2)
+        try:
+            while True:
+                data = PING_BYTES
+                logger.debug("send ping")
+                self.server_socket_helper.write(self.cipher.encrypt(data))
+                data = self.server_socket_helper.read()
+                data = self.cipher.decrypt(data)
+                if data != PONG_BYTES:
+                    logger.debug("received:%s" % data)
+                    break
+                logger.debug("received pong")
+                gevent.sleep(self.socket_timeout / 2)
+        except _socket.timeout:
+            logger.debug("timeout")
+            pass
+        except ConnectionError:
+            logger.debug("socket closed")
+            pass
+        except OSError as e:
+            logger.debug(e.strerror)
+            pass
+        except gevent.GreenletExit:
+            logger.debug("green let exit")
+            pass
+        except gevent._socketcommon.cancel_wait_ex:
+            logger.debug("socket closed")
+            pass
         logger.debug("exit")
 
     def __call__(self, *args, **kwargs):
@@ -81,8 +98,15 @@ class ReverseProxyClient(object):
             self.server_socket.close()
             return
         connect_uuid = json_data["connect_uuid"]
-        self.thread_list.append(gevent.spawn(self.do_ping_pong))
-        self.parse_server_socket2(connect_uuid)
+        do_ping_pong = gevent.spawn(self.do_ping_pong)
+        self.thread_list.append(do_ping_pong)
+        while not do_ping_pong.ready():
+            try:
+                self.parse_server_socket2(connect_uuid)
+            except ConnectionError:
+                logger.debug("connect error")
+            gevent.sleep(1)
+        gevent.killall(self.thread_list)
 
     def parse_server_socket2(self, connect_uuid):
         server_socket2 = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
@@ -94,16 +118,12 @@ class ReverseProxyClient(object):
         if not data_buffer:
             logger.debug("close the socket")
             server_socket2.close()
-            self.server_socket.close()
-            gevent.killall(self.thread_list)
             return
         first_data = self.cipher.decrypt(data_buffer)
         logger.debug("received:%s" % first_data)
         if first_data != b'ok':
             logger.debug("close the socket")
             server_socket2.close()
-            self.server_socket.close()
-            gevent.killall(self.thread_list)
             return
 
         json_data = {"type": "from_uuid", "connect_uuid": connect_uuid}
@@ -118,17 +138,18 @@ class ReverseProxyClient(object):
         if json_data["data_type"] != "accept":
             logger.debug("close the socket")
             server_socket2.close()
-            self.server_socket.close()
-            gevent.killall(self.thread_list)
             return
 
-        self.thread_list.append(gevent.spawn(self.parse_server_socket2_read, server_socket2_helper))
-        self.thread_list.append(gevent.spawn(self.parse_server_socket2_write, server_socket2_helper))
+        r = gevent.spawn(self.parse_server_socket2_read, server_socket2_helper)
+        w = gevent.spawn(self.parse_server_socket2_write, server_socket2_helper)
+        self.thread_list.append(r)
+        self.thread_list.append(w)
         gevent.wait(self.thread_list, count=1)
         logger.debug("close the socket")
         server_socket2.close()
-        self.server_socket.close()
-        gevent.killall(self.thread_list)
+        gevent.killall([r, w])
+        self.thread_list.remove(r)
+        self.thread_list.remove(w)
 
     def parse_server_socket2_read(self, server_socket2_helper):
         while True:
@@ -143,7 +164,7 @@ class ReverseProxyClient(object):
                     self.server_socket2_write_queue.put(data)
                     continue
                 if c_data == PONG_BYTES:
-                    logger.debug("received:%s" % c_data)
+                    logger.debug("received pong")
                     continue
                 if c_data.startswith(DATA_BYTES):
                     c_data = c_data[LEN_DATA_BYTES:]
@@ -232,7 +253,7 @@ class ReverseProxyClient(object):
                         break
                 except Empty:
                     c_data = PING_BYTES
-                    logger.debug("send:%s" % c_data)
+                    logger.debug("send ping")
                     c_data = self.cipher.encrypt(c_data)
                 if isinstance(c_data, (list, tuple)):
                     for item in c_data:
@@ -343,6 +364,25 @@ class ReverseProxyClient(object):
 def client_main(ip="127.0.0.1", port=10086, password="password", method=default_cipher_name,
                 upstream_ip="127.0.0.1", upstream_port=2000,
                 listen_ip="127.0.0.1", listen_port=12000):
+    parser = ArgumentParser(description="SimpleReverseProxy Client")
+    parser.add_argument('--ip', type=str, default=ip,
+                        help="set server ip")
+    parser.add_argument('--port', type=int, default=port,
+                        help="set server port")
+    parser.add_argument('--upstream_ip', type=str, default=upstream_ip,
+                        help="set upstream ip")
+    parser.add_argument('--upstream_port', type=int, default=upstream_port,
+                        help="set upstream port")
+    parser.add_argument('--listen_ip', type=str, default=listen_ip,
+                        help="set listen ip")
+    parser.add_argument('--listen_port', type=int, default=listen_port,
+                        help="set listen port")
+    parser.add_argument('--password', type=str, default=password,
+                        help="the password used to connect")
+    parser.add_argument('--method', type=str, default=method,
+                        help="the encrypt method used to connect")
+    args = parser.parse_args()
     logger.info("start client connect to %s:%d" % (ip, port))
-    client = ReverseProxyClient(ip, port, password, method, upstream_ip, upstream_port, listen_ip, listen_port)
+    client = ReverseProxyClient(args.ip, args.port, args.password, args.method, args.upstream_ip, args.upstream_port,
+                                args.listen_ip, args.listen_port)
     client()
