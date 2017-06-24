@@ -7,6 +7,7 @@ from __future__ import (absolute_import, division,
 from Crypto import Random
 from Crypto.Cipher import AES, ChaCha20, Salsa20, ARC4
 from Crypto.Util.py3compat import tobytes, tostr
+from .utils import SPLIT_BYTES
 import hashlib
 import zlib
 
@@ -68,10 +69,14 @@ class BaseCipher(object):
         return data
 
     def encrypt(self, data):
-        data = tobytes(data)
+        raw_data = tobytes(data)
         # data = zlib.compress(data)
         iv = random.read(self.IV_LENGTH)
-        data = self.get_cipher(iv).encrypt(data)
+        while SPLIT_BYTES in iv:
+            iv = random.read(self.IV_LENGTH)
+        data = self.get_cipher(iv).encrypt(raw_data)
+        if SPLIT_BYTES in data:
+            return self.encrypt(raw_data)
         data = iv + data
         return data
 
@@ -139,14 +144,6 @@ class Salsa20Cipher(BaseCipher):
         return Salsa20.new(key=self.key, nonce=iv)
 
 
-class RC4Cipher(BaseCipher):
-    KEY_LENGTH = 16
-    IV_LENGTH = 0
-
-    def get_cipher(self, iv):
-        return ARC4.new(self.key)
-
-
 class RC4MD5Cipher(BaseCipher):
     KEY_LENGTH = 16
     IV_LENGTH = 0
@@ -168,34 +165,9 @@ ciphers = {
     "aes-128-cfb": AES128CFBCipher,
     "salsa20": Salsa20Cipher,
     "chacha20": ChaCha20Cipher,
-    "rc4": RC4Cipher,
     "rc4-md5": RC4MD5Cipher,
     "none": NoneCipher
 }
 
 default_cipher_name = "chacha20"
 default_cipher = ciphers[default_cipher_name]
-
-
-def test():
-    import time
-
-    password = random.read(20)
-    raw_data = random.read(200000000)
-
-    for name, cipher_class in ciphers.items():
-        time1 = time.time()
-        cipher = cipher_class(password)
-        time2 = time.time()
-        encrypt_data = cipher.encrypt(raw_data)
-        # time3 = time.time()
-        # decrypt_data = cipher.decrypt(encrypt_data)
-        # time4 = time.time()
-        # print(name + " tests " + str(decrypt_data == raw_data) + " encrypt in:" + str(
-        #     time3 - time2) + " decrypt in:" + str(time4 - time3))
-        print(encrypt_data.find(b'\r\n \r\n'))
-
-
-if __name__ == '__main__':
-    while True:
-        test()
