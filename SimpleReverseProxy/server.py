@@ -59,7 +59,7 @@ class ListenPortServer(object):
                 # server_write_ok_queue.get()
                 # self.client_queue.put((data, data_buffer))
 
-                data = DATA_BYTES + tobytes(socket_uuid) + data_buffer
+                data = DATA_BYTES + int(socket_uuid, 16).to_bytes(16, 'big') + data_buffer
                 data = self.cipher.encrypt(data)
                 server_write_ok_queue.get()
                 self.client_queue.put(data, data_buffer)
@@ -83,7 +83,7 @@ class ListenPortServer(object):
                 socket_helper.write(c_data)
                 # json_data = {"type": "finish_write_socket", "socket_uuid": socket_uuid}
                 # json_data = json.dumps(json_data)
-                json_data = FINISH_WRITE_SOCKET_BYTES + tobytes(socket_uuid)
+                json_data = FINISH_WRITE_SOCKET_BYTES + int(socket_uuid, 16).to_bytes(16, 'big')
                 # logger.debug("send:%s" % json_data)
                 json_data = self.cipher.encrypt(json_data)
                 self.client_queue.put(json_data)
@@ -140,16 +140,16 @@ class ListenPortServer(object):
                         continue
                     if c_data.startswith(DATA_BYTES):
                         c_data = c_data[LEN_DATA_BYTES:]
-                        socket_uuid = tostr(c_data[:32])
+                        socket_uuid = '%032x' % int.from_bytes((c_data[:16]), 'big')
                         # logger.debug(socket_uuid)
-                        socket_data = c_data[32:]
+                        socket_data = c_data[16:]
                         server_write_queue = self.server_write_queue_dict[socket_uuid]
                         server_write_queue.put(socket_data)
                         continue
                     if c_data.startswith(FINISH_WRITE_SOCKET_BYTES):
                         # logger.debug("received:%s" % c_data)
                         c_data = c_data[LEN_FINISH_WRITE_SOCKET_BYTES:]
-                        socket_uuid = tostr(c_data)
+                        socket_uuid = '%032x' % int.from_bytes((c_data[:16]), 'big')
                         # logger.debug(socket_uuid)
                         server_write_ok_queue = self.server_write_ok_queue_dict[socket_uuid]
                         server_write_ok_queue.put(True)

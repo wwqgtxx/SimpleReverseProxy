@@ -168,9 +168,9 @@ class ReverseProxyClient(object):
                     continue
                 if c_data.startswith(DATA_BYTES):
                     c_data = c_data[LEN_DATA_BYTES:]
-                    socket_uuid = tostr(c_data[:32])
+                    socket_uuid = '%032x' % int.from_bytes((c_data[:16]), 'big')
                     # logger.debug(socket_uuid)
-                    data = c_data[32:]
+                    data = c_data[16:]
                     try:
                         upstream_write_queue = self.upstream_write_queue_dict[socket_uuid]
                         upstream_write_queue.put(data)
@@ -180,7 +180,7 @@ class ReverseProxyClient(object):
                 if c_data.startswith(FINISH_WRITE_SOCKET_BYTES):
                     # logger.debug("received:%s" % c_data)
                     c_data = c_data[LEN_FINISH_WRITE_SOCKET_BYTES:]
-                    socket_uuid = tostr(c_data)
+                    socket_uuid = '%032x' % int.from_bytes((c_data[:16]), 'big')
                     # logger.debug(socket_uuid)
                     try:
                         server_write_queue = self.upstream_write_ok_queue_dict[socket_uuid]
@@ -320,7 +320,7 @@ class ReverseProxyClient(object):
                 # upstream_write_ok_queue.get()
                 # self.server_socket2_write_queue.put((data, data_buffer))
 
-                data = DATA_BYTES + tobytes(socket_uuid) + data_buffer
+                data = DATA_BYTES + int(socket_uuid, 16).to_bytes(16, 'big')  + data_buffer
                 data = self.cipher.encrypt(data)
                 upstream_write_ok_queue.get()
                 self.server_socket2_write_queue.put(data, data_buffer)
@@ -345,7 +345,7 @@ class ReverseProxyClient(object):
                 # json_data = {"type": "finish_write_socket", "socket_uuid": socket_uuid}
                 # json_data = json.dumps(json_data)
 
-                json_data = FINISH_WRITE_SOCKET_BYTES + tobytes(socket_uuid)
+                json_data = FINISH_WRITE_SOCKET_BYTES + int(socket_uuid, 16).to_bytes(16, 'big')
                 # logger.debug("send:%s" % json_data)
                 json_data = self.cipher.encrypt(json_data)
                 # logger.debug("send:%s" % json_data)

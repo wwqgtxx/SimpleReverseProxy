@@ -7,7 +7,7 @@ from __future__ import (absolute_import, division,
 from Crypto import Random
 from Crypto.Cipher import AES, ChaCha20, Salsa20, ARC4
 from Crypto.Util.py3compat import tobytes, tostr
-from .utils import SPLIT_BYTES
+from .utils import SPLIT_BYTES, crc32
 import hashlib
 import zlib
 
@@ -60,6 +60,14 @@ class BaseCipher(object):
         self.key = self.get_key(password)
 
     def decrypt(self, data):
+        if len(data) < 4:
+            return b''
+        crc32_bytes = data[:4]
+        crc32_value1 = int.from_bytes(crc32_bytes, 'big')
+        data = data[4:]
+        crc32_value2 = crc32(data)
+        if crc32_value1 != crc32_value2:
+            return b''
         iv = data[:self.IV_LENGTH]
         data = data[self.IV_LENGTH:]
         if not data:
@@ -75,9 +83,11 @@ class BaseCipher(object):
         while SPLIT_BYTES in iv:
             iv = random.read(self.IV_LENGTH)
         data = self.get_cipher(iv).encrypt(raw_data)
+        data = iv + data
+        crc32_bytes = crc32(data).to_bytes(4, 'big')
+        data = crc32_bytes + data
         if SPLIT_BYTES in data:
             return self.encrypt(raw_data)
-        data = iv + data
         return data
 
     def get_cipher(self, iv):
