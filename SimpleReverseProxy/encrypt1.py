@@ -5,16 +5,21 @@ from __future__ import (absolute_import, division,
                         print_function, unicode_literals)
 
 try:
-    import cffi
-
-    ffi = cffi.FFI
-    del cffi.FFI
-
     from Crypto.Util._raw_api import backend
+except OSError:  # fix for cx_Freeze
+    try:
+        print("try not use cffi to import Crypto library")
+        import cffi
 
-    cffi.FFI = ffi
-except ImportError:
-    ffi = None
+        ffi = cffi.FFI
+        del cffi.FFI
+
+        from Crypto.Util._raw_api import backend
+
+        cffi.FFI = ffi
+        print("import Crypto successfully")
+    except ImportError:
+        pass
 
 from Crypto.Cipher import AES, ChaCha20, Salsa20, ARC4
 
