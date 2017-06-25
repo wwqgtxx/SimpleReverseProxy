@@ -19,6 +19,8 @@ logger = logging.getLogger("SRP")
 def tobytes(s):
     if isinstance(s, bytes):
         return s
+    elif isinstance(s, bytearray):
+        return bytes(s)
     else:
         if isinstance(s, str):
             return s.encode("latin-1")

@@ -4,6 +4,7 @@
 from __future__ import (absolute_import, division,
                         print_function, unicode_literals)
 import unittest
+from test_encrypt0 import Test as test0
 from test_encrypt1 import Test as test1
 from test_encrypt2 import Test as test2
 

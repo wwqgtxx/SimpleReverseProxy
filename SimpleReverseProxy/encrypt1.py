@@ -19,7 +19,7 @@ except ImportError:
 from Crypto.Cipher import AES, ChaCha20, Salsa20, ARC4
 
 import hashlib
-from .encrypt0 import BaseCipher as _BaseCipher, ciphers
+from .encrypt0 import BaseCipher as _BaseCipher, ChaCha20IETFPoly1305Cipher, ciphers, tobytes
 
 
 class BaseCipher(_BaseCipher):
@@ -113,6 +113,21 @@ class RC4MD5Cipher(BaseCipher):
         return ARC4.new(rc4_key)
 
 
+class ChaCha20Poly1305Cipher(ChaCha20IETFPoly1305Cipher):
+    KEY_LENGTH = 32
+    IV_LENGTH = 8
+
+    def get_cipher(self, iv):
+        raise NotImplementedError
+
+    def chacha20_encrypt(self, nonce, plaintext, counter=0):
+        plaintext = tobytes(plaintext)
+        return ChaCha20.new(key=self.key, nonce=nonce).encrypt(plaintext)
+
+    def chacha20_decrypt(self, nonce, ciphertext, counter=0):
+        return ChaCha20.new(key=self.key, nonce=nonce).decrypt(ciphertext)
+
+
 def init():
     ciphers.update({
         "aes-256-gcm": AES256GCMCipher,
@@ -124,4 +139,5 @@ def init():
         "salsa20": Salsa20Cipher,
         "chacha20": ChaCha20Cipher,
         "rc4-md5": RC4MD5Cipher,
+        "chacha20-poly1305": ChaCha20Poly1305Cipher
     })

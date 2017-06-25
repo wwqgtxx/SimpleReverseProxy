@@ -143,6 +143,20 @@ class Test(unittest.TestCase):
         decrypt_data = cipher.decrypt(encrypt_data)
         self.assertNotEqual(self.raw_data, decrypt_data)
 
+    def testChaCha20Poly1305Cipher(self):
+        cipher = ChaCha20Poly1305Cipher(password=self.password)
+        encrypt_data = cipher.encrypt(self.raw_data)
+        decrypt_data = cipher.decrypt(encrypt_data)
+        self.assertEqual(self.raw_data, decrypt_data)
+        self.assertNotIn(SPLIT_BYTES, encrypt_data)
+
+    def testChaCha20Poly1305CipherWithWrongPassword(self):
+        cipher = ChaCha20Poly1305Cipher(password=self.password)
+        encrypt_data = cipher.encrypt(self.raw_data)
+        cipher = ChaCha20Poly1305Cipher(password=self.wrong_password)
+        decrypt_data = cipher.decrypt(encrypt_data)
+        self.assertEqual(b'', decrypt_data)
+
 
 if __name__ == '__main__':
     unittest.main()
