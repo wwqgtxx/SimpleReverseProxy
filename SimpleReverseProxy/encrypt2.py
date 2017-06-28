@@ -112,7 +112,7 @@ def init():
     password = os.urandom(20)
     for k, v in pre_update_ciphers.items():
         try:
-            cipher = v(password)
+            cipher = v(password, saved_iv=False)
             cipher.encrypt(password)
             ciphers[k] = v
         except UnsupportedAlgorithm:

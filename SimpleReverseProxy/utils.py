@@ -82,6 +82,10 @@ LEN_PONG_BYTES = len(PONG_BYTES)
 LEN_DATA_BYTES = len(DATA_BYTES)
 LEN_FINISH_WRITE_SOCKET_BYTES = len(FINISH_WRITE_SOCKET_BYTES)
 
+DATA_PRIORITY = 100
+FINISH_WRITE_SOCKET_PRIORITY = 50
+CONTROL_PRIORITY = 10
+
 
 class SocketHelper(object):
     def __init__(self, socket: _socket.socket, parse_split_bytes=True):
@@ -99,6 +103,7 @@ class SocketHelper(object):
                     return data_arr[0]
             while True:
                 data = self.socket.recv(self.buffer_size)
+                # logger.debug(data)
                 if not data:
                     raise ConnectionError()
                 self.last_buffer += data
@@ -110,6 +115,7 @@ class SocketHelper(object):
                     return data
         else:
             data = self.socket.recv(self.buffer_size)
+            # logger.debug(data)
             if not data:
                 raise ConnectionError()
             # logger.debug(data)

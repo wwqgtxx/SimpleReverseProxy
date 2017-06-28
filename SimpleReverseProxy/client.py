@@ -13,10 +13,11 @@ import uuid
 import json
 import gevent
 from argparse import ArgumentParser
-from queue import Queue, Empty
+from queue import PriorityQueue, Queue, Empty
 from .encrypt import ciphers, default_cipher_name
 from .utils import logger, SocketHelper, base85_encode, base85_decode, SPLIT_BYTES, PING_BYTES, PONG_BYTES, DATA_BYTES, \
-    FINISH_WRITE_SOCKET_BYTES, LEN_DATA_BYTES, LEN_PING_BYTES, LEN_PONG_BYTES, LEN_FINISH_WRITE_SOCKET_BYTES
+    FINISH_WRITE_SOCKET_BYTES, LEN_DATA_BYTES, LEN_PING_BYTES, LEN_PONG_BYTES, LEN_FINISH_WRITE_SOCKET_BYTES, \
+    DATA_PRIORITY, FINISH_WRITE_SOCKET_PRIORITY, CONTROL_PRIORITY
 
 
 class ReverseProxyClient(object):
@@ -30,10 +31,11 @@ class ReverseProxyClient(object):
         self.listen_ip = listen_ip
         self.listen_port = listen_port
         self.cipher = ciphers[method](password)
+        self.cipher2 = self.cipher.clone()
         self.server_socket = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         self.server_socket_helper = SocketHelper(self.server_socket)
         self.thread_list = list()
-        self.server_socket2_write_queue = Queue(1)
+        self.server_socket2_write_queue = PriorityQueue()
         self.upstream_write_queue_dict = dict()
         self.upstream_write_ok_queue_dict = dict()
         self.upstream_socket_dict = dict()
@@ -113,13 +115,14 @@ class ReverseProxyClient(object):
         server_socket2_helper = SocketHelper(server_socket2)
         server_socket2.settimeout(self.socket_timeout)
         server_socket2.connect((self.ip, self.port))
-        server_socket2_helper.write(self.cipher.encrypt(b"ok"))
+        self.cipher2 = self.cipher.clone()
+        server_socket2_helper.write(self.cipher2.encrypt(b"ok"))
         data_buffer = server_socket2_helper.read()
         if not data_buffer:
             logger.debug("close the socket")
             server_socket2.close()
             return
-        first_data = self.cipher.decrypt(data_buffer)
+        first_data = self.cipher2.decrypt(data_buffer)
         logger.debug("received:%s" % first_data)
         if first_data != b'ok':
             logger.debug("close the socket")
@@ -129,10 +132,10 @@ class ReverseProxyClient(object):
         json_data = {"type": "from_uuid", "connect_uuid": connect_uuid}
         json_data = json.dumps(json_data)
         logger.debug("send:%s" % json_data)
-        json_data = self.cipher.encrypt(json_data)
+        json_data = self.cipher2.encrypt(json_data)
         server_socket2_helper.write(json_data)
         data_buffer = server_socket2_helper.read()
-        json_data = self.cipher.decrypt(data_buffer)
+        json_data = self.cipher2.decrypt(data_buffer)
         logger.debug("received:%s" % json_data)
         json_data = json.loads(json_data)
         if json_data["data_type"] != "accept":
@@ -156,12 +159,12 @@ class ReverseProxyClient(object):
             try:
                 # logger.debug("waiting for data")
                 data_buffer = server_socket2_helper.read()
-                c_data = self.cipher.decrypt(data_buffer)
+                c_data = self.cipher2.decrypt(data_buffer)
                 # logger.debug("received:%s" % c_data)
                 if c_data == PING_BYTES:
                     data = PONG_BYTES
-                    data = self.cipher.encrypt(data)
-                    self.server_socket2_write_queue.put(data)
+                    data = self.cipher2.encrypt(data)
+                    self.server_socket2_write_queue.put((CONTROL_PRIORITY, data))
                     continue
                 if c_data == PONG_BYTES:
                     logger.debug("received pong")
@@ -200,7 +203,8 @@ class ReverseProxyClient(object):
                         logger.debug("received:%s" % c_data)
                         socket_uuid = c_json["socket_uuid"]
                         try:
-                            self.upstream_socket_dict[socket_uuid].close()
+                            upstream_socket = self.upstream_socket_dict[socket_uuid]
+                            upstream_socket.close()
                         except KeyError:
                             pass
                         except:
@@ -219,7 +223,7 @@ class ReverseProxyClient(object):
                     elif data_type == "data":
                         socket_uuid = c_json["socket_uuid"]
                         data = server_socket2_helper.read()  # c_json["data"]
-                        data = self.cipher.decrypt(data)
+                        data = self.cipher2.decrypt(data)
                         # data = base85_decode(data, return_type=bytes)
                         # logger.debug(data)
                         try:
@@ -247,20 +251,20 @@ class ReverseProxyClient(object):
         try:
             while True:
                 try:
-                    c_data = self.server_socket2_write_queue.get(timeout=self.socket_timeout / 2)
+                    _, c_data = self.server_socket2_write_queue.get(timeout=self.socket_timeout / 2)
                     # logger.debug("send:%s" % c_data)
                     if c_data is None:
                         break
                 except Empty:
                     c_data = PING_BYTES
                     logger.debug("send ping")
-                    c_data = self.cipher.encrypt(c_data)
+                    c_data = self.cipher2.encrypt(c_data)
                 if isinstance(c_data, (list, tuple)):
                     for item in c_data:
-                        # item = self.cipher.encrypt(item)
+                        # item = self.cipher2.encrypt(item)
                         server_socket2_helper.write(item)
                 else:
-                    # c_data = self.cipher.encrypt(c_data)
+                    # c_data = self.cipher2.encrypt(c_data)
                     server_socket2_helper.write(c_data)
         except _socket.timeout:
             logger.debug("timeout")
@@ -280,8 +284,8 @@ class ReverseProxyClient(object):
         upstream_socket = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         upstream_socket.connect((self.upstream_ip, self.upstream_port))
         upstream_socket_helper = SocketHelper(upstream_socket, parse_split_bytes=False)
-        upstream_write_queue = Queue(1)
-        upstream_write_ok_queue = Queue(1)
+        upstream_write_queue = Queue()
+        upstream_write_ok_queue = Queue()
         self.upstream_write_queue_dict[socket_uuid] = upstream_write_queue
         self.upstream_write_ok_queue_dict[socket_uuid] = upstream_write_ok_queue
         self.upstream_socket_dict[socket_uuid] = upstream_socket
@@ -290,16 +294,16 @@ class ReverseProxyClient(object):
         json_data = {"type": "finish_new_socket", "socket_uuid": socket_uuid}
         json_data = json.dumps(json_data)
         logger.debug("send:%s" % json_data)
-        json_data = self.cipher.encrypt(json_data)
-        self.server_socket2_write_queue.put(json_data)
+        json_data = self.cipher2.encrypt(json_data)
+        self.server_socket2_write_queue.put((CONTROL_PRIORITY, json_data))
         gevent.wait([r, w], count=1)
         gevent.killall([r, w])
         logger.debug("socket_uuid=%s exit" % socket_uuid)
         data = {"type": "close_socket", "socket_uuid": socket_uuid}
         data = json.dumps(data)
         logger.debug("send:%s" % data)
-        data = self.cipher.encrypt(data)
-        self.server_socket2_write_queue.put(data)
+        data = self.cipher2.encrypt(data)
+        self.server_socket2_write_queue.put((CONTROL_PRIORITY, json_data))
         self.upstream_socket_dict.pop(socket_uuid, None)
         upstream_socket.close()
 
@@ -315,15 +319,15 @@ class ReverseProxyClient(object):
                 # data = {"type": "data", "socket_uuid": socket_uuid}  # , "data": data_buffer}
                 # data = json.dumps(data)
                 # # logger.debug(data)
-                # data = self.cipher.encrypt(data)
-                # data_buffer = self.cipher.encrypt(data_buffer)
+                # data = self.cipher2.encrypt(data)
+                # data_buffer = self.cipher2.encrypt(data_buffer)
                 # upstream_write_ok_queue.get()
-                # self.server_socket2_write_queue.put((data, data_buffer))
+                # self.server_socket2_write_queue.put((DATA_PRIORITY, (data, data_buffer)))
 
                 data = DATA_BYTES + int(socket_uuid, 16).to_bytes(16, 'big') + data_buffer
-                data = self.cipher.encrypt(data)
+                data = self.cipher2.encrypt(data)
                 upstream_write_ok_queue.get()
-                self.server_socket2_write_queue.put(data, data_buffer)
+                self.server_socket2_write_queue.put((DATA_PRIORITY, data))
         except _socket.timeout:
             pass
         except ConnectionError:
@@ -347,9 +351,9 @@ class ReverseProxyClient(object):
 
                 json_data = FINISH_WRITE_SOCKET_BYTES + int(socket_uuid, 16).to_bytes(16, 'big')
                 # logger.debug("send:%s" % json_data)
-                json_data = self.cipher.encrypt(json_data)
+                json_data = self.cipher2.encrypt(json_data)
                 # logger.debug("send:%s" % json_data)
-                self.server_socket2_write_queue.put(json_data)
+                self.server_socket2_write_queue.put((FINISH_WRITE_SOCKET_PRIORITY, json_data))
         except _socket.timeout:
             pass
         except ConnectionError:

@@ -14,26 +14,26 @@ import json
 import time
 import gevent
 from argparse import ArgumentParser
-from queue import Queue, Empty
+from queue import PriorityQueue, Queue, Empty
 from gevent.server import StreamServer
 from .encrypt import ciphers, default_cipher_name
 from .utils import logger, SocketHelper, base85_encode, base85_decode, PING_BYTES, PONG_BYTES, DATA_BYTES, \
-    FINISH_WRITE_SOCKET_BYTES, LEN_DATA_BYTES, LEN_PING_BYTES, LEN_PONG_BYTES, LEN_FINISH_WRITE_SOCKET_BYTES
+    FINISH_WRITE_SOCKET_BYTES, LEN_DATA_BYTES, LEN_PING_BYTES, LEN_PONG_BYTES, LEN_FINISH_WRITE_SOCKET_BYTES, \
+    DATA_PRIORITY, FINISH_WRITE_SOCKET_PRIORITY, CONTROL_PRIORITY
 
 listen_port_server_dict1 = {}
 listen_port_server_dict2 = {}
 
 
 class ListenPortServer(object):
-    def __init__(self, ip, port, connect_uuid, cipher):
+    def __init__(self, ip, port, connect_uuid):
         self.ip = ip
         self.port = port
         self.connect_uuid = connect_uuid
-        self.cipher = cipher
         self.socket_handle_socket_dict = dict()
         self.server_write_queue_dict = dict()
         self.server_write_ok_queue_dict = dict()
-        self.client_queue = Queue(1)
+        self.client_queue = PriorityQueue()
         self.server = None  # type:StreamServer
         listen_port_server_dict1[(self.ip, self.port)] = self
         listen_port_server_dict2[self.connect_uuid] = self
@@ -54,15 +54,12 @@ class ListenPortServer(object):
                 # data_buffer = base85_encode(data_buffer)
                 # data = {"type": "data", "socket_uuid": socket_uuid}  # , "data": data_buffer}
                 # data = json.dumps(data)
-                # data = self.cipher.encrypt(data)
-                # data_buffer = self.cipher.encrypt(data_buffer)
                 # server_write_ok_queue.get()
-                # self.client_queue.put((data, data_buffer))
+                # self.client_queue.put((DATA_PRIORITY, (data, data_buffer)))
 
                 data = DATA_BYTES + int(socket_uuid, 16).to_bytes(16, 'big') + data_buffer
-                data = self.cipher.encrypt(data)
                 server_write_ok_queue.get()
-                self.client_queue.put(data, data_buffer)
+                self.client_queue.put((DATA_PRIORITY, data))
         except _socket.timeout:
             pass
         except ConnectionError:
@@ -85,8 +82,7 @@ class ListenPortServer(object):
                 # json_data = json.dumps(json_data)
                 json_data = FINISH_WRITE_SOCKET_BYTES + int(socket_uuid, 16).to_bytes(16, 'big')
                 # logger.debug("send:%s" % json_data)
-                json_data = self.cipher.encrypt(json_data)
-                self.client_queue.put(json_data)
+                self.client_queue.put((FINISH_WRITE_SOCKET_PRIORITY, json_data))
         except _socket.timeout:
             pass
         except ConnectionError:
@@ -97,16 +93,15 @@ class ListenPortServer(object):
     def socket_handle(self, socket, address):
         logger.info("new TCP client<%s> connect" % str(address))
         socket_uuid = uuid.uuid4().hex
-        server_write_queue = Queue(1)
-        server_write_ok_queue = Queue(1)
+        server_write_queue = Queue()
+        server_write_ok_queue = Queue()
         self.server_write_queue_dict[socket_uuid] = server_write_queue
         self.server_write_ok_queue_dict[socket_uuid] = server_write_ok_queue
         self.socket_handle_socket_dict[socket_uuid] = socket
         data = {"type": "new_socket", "socket_uuid": socket_uuid}
         logger.debug("send:%s" % data)
         data = json.dumps(data)
-        data = self.cipher.encrypt(data)
-        self.client_queue.put(data)
+        self.client_queue.put((CONTROL_PRIORITY, data))
         socket_helper = SocketHelper(socket, parse_split_bytes=False)
         server_write_queue.get()
         r = gevent.spawn(self.socket_handle_read, socket_helper, server_write_ok_queue, socket_uuid)
@@ -116,24 +111,22 @@ class ListenPortServer(object):
         data = {"type": "close_socket", "socket_uuid": socket_uuid}
         logger.debug("send:%s" % data)
         data = json.dumps(data)
-        data = self.cipher.encrypt(data)
         self.server_write_queue_dict.pop(socket_uuid, None)
         self.server_write_ok_queue_dict.pop(socket_uuid, None)
         self.socket_handle_socket_dict.pop(socket_uuid, None)
-        self.client_queue.put(data)
+        self.client_queue.put((CONTROL_PRIORITY, data))
 
     def parse_client_read(self, reverse_proxy_server):
         try:
             while True:
                 try:
                     data_buffer = reverse_proxy_server.socket_helper.read()
-                    c_data = self.cipher.decrypt(data_buffer)
+                    c_data = reverse_proxy_server.cipher.decrypt(data_buffer)
                     # logger.debug("received:%s" % c_data)
                     if c_data == PING_BYTES:
                         logger.debug("received ping")
                         data = PONG_BYTES
-                        data = self.cipher.encrypt(data)
-                        self.client_queue.put(data)
+                        self.client_queue.put((CONTROL_PRIORITY, data))
                         continue
                     if c_data == PONG_BYTES:
                         logger.debug("received pong")
@@ -160,7 +153,7 @@ class ListenPortServer(object):
                         if data_type == "data":
                             socket_uuid = c_json["socket_uuid"]
                             socket_data = reverse_proxy_server.socket_helper.read()  # c_json["data"]
-                            socket_data = self.cipher.decrypt(socket_data)
+                            socket_data = reverse_proxy_server.cipher.decrypt(socket_data)
                             server_write_queue = self.server_write_queue_dict[socket_uuid]
                             # socket_data = base85_decode(socket_data, return_type=bytes)
                             # logger.debug(socket_data)
@@ -196,19 +189,19 @@ class ListenPortServer(object):
         try:
             while True:
                 try:
-                    s_data = self.client_queue.get(timeout=reverse_proxy_server.socket_timeout / 2)
+                    _, s_data = self.client_queue.get(timeout=reverse_proxy_server.socket_timeout / 2)
+                    # logger.debug(s_data)
                     if s_data is None:
                         break
                 except Empty:
                     s_data = PING_BYTES
                     logger.debug("send ping")
-                    s_data = self.cipher.encrypt(s_data)
                 if isinstance(s_data, (list, tuple)):
                     for item in s_data:
-                        # item = self.cipher.encrypt(item)
+                        item = reverse_proxy_server.cipher.encrypt(item)
                         reverse_proxy_server.socket_helper.write(item)
                 else:
-                    # s_data = self.cipher.encrypt(s_data)
+                    s_data = reverse_proxy_server.cipher.encrypt(s_data)
                     reverse_proxy_server.socket_helper.write(s_data)
         except _socket.timeout:
             pass
@@ -230,7 +223,7 @@ class ListenPortServer(object):
         listen_port_server_dict2.pop(self.connect_uuid, None)
         if self.server:
             self.server.stop()
-            self.client_queue.put(None)
+            self.client_queue.put((0, None))
             for item in self.server_write_queue_dict.values():
                 item.put(None)
 
@@ -255,6 +248,7 @@ class ReverseProxyServer(object):
             self.socket.close()
             return
         first_data = self.cipher.decrypt(data_buffer)
+        logger.debug("received:%s" % first_data)
         if first_data != b'ok':
             logger.debug("close the socket")
             self.socket.close()
@@ -280,7 +274,7 @@ class ReverseProxyServer(object):
                     listen_port_server = listen_port_server_dict1.get((listen_ip, listen_port), None)
                     if not listen_port_server:
                         connect_uuid = uuid.uuid4().hex
-                        listen_port_server = ListenPortServer(listen_ip, listen_port, connect_uuid, self.cipher)
+                        listen_port_server = ListenPortServer(listen_ip, listen_port, connect_uuid)
                         gevent.spawn(listen_port_server)
                         json_data = {"data_type": "accept", "connect_uuid": connect_uuid}
                         json_data = json.dumps(json_data)

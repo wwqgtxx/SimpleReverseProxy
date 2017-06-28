@@ -17,30 +17,30 @@ class Test(unittest.TestCase):
         pass
 
     def testChaCha20IETFCipher(self):
-        cipher = ChaCha20IETFCipher(password=self.password)
+        cipher = ChaCha20IETFCipher(password=self.password, saved_iv=False)
         encrypt_data = cipher.encrypt(self.raw_data)
         decrypt_data = cipher.decrypt(encrypt_data)
         self.assertEqual(self.raw_data, decrypt_data)
         self.assertNotIn(SPLIT_BYTES, encrypt_data)
 
     def testChaCha20IETFCipherWithWrongPassword(self):
-        cipher = ChaCha20IETFCipher(password=self.password)
+        cipher = ChaCha20IETFCipher(password=self.password, saved_iv=False)
         encrypt_data = cipher.encrypt(self.raw_data)
         cipher = ChaCha20IETFCipher(password=self.wrong_password)
         decrypt_data = cipher.decrypt(encrypt_data)
         self.assertNotEqual(self.raw_data, decrypt_data)
 
     def testChaCha20IETFPoly1305Cipher(self):
-        cipher = ChaCha20IETFPoly1305Cipher(password=self.password)
+        cipher = ChaCha20IETFPoly1305Cipher(password=self.password, saved_iv=False)
         encrypt_data = cipher.encrypt(self.raw_data)
         decrypt_data = cipher.decrypt(encrypt_data)
         self.assertEqual(self.raw_data, decrypt_data)
         self.assertNotIn(SPLIT_BYTES, encrypt_data)
 
     def testChaCha20IETFPoly1305CipherWithWrongPassword(self):
-        cipher = ChaCha20IETFPoly1305Cipher(password=self.password)
+        cipher = ChaCha20IETFPoly1305Cipher(password=self.password, saved_iv=False)
         encrypt_data = cipher.encrypt(self.raw_data)
-        cipher = ChaCha20IETFPoly1305Cipher(password=self.wrong_password)
+        cipher = ChaCha20IETFPoly1305Cipher(password=self.wrong_password, saved_iv=False)
         decrypt_data = cipher.decrypt(encrypt_data)
         self.assertEqual(b'', decrypt_data)
 

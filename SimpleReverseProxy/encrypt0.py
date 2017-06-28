@@ -55,26 +55,41 @@ class BaseCipher(object):
             iv = os.urandom(self.IV_LENGTH)
         return iv
 
-    def __init__(self, password, iv=None):
+    def __init__(self, password, iv=None, saved_iv=True):
         self.key = self.get_key(password)
         self.iv = iv
+        self.saved_iv = saved_iv
+
+    def clone(self, without_iv=True):
+        obj = object.__new__(self.__class__)
+        obj.key = self.key
+        if without_iv:
+            obj.iv = None
+        else:
+            obj.iv = self.iv
+        obj.saved_iv = self.saved_iv
+        return obj
 
     def decrypt(self, data):
-        if len(data) < 4:
+        if len(data) < 5:
             return b''
         crc32_bytes = data[:4]
         crc32_value1 = int.from_bytes(crc32_bytes, 'big')
         data = data[4:]
         crc32_value2 = crc32(data)
+        data = data[1:]
         if crc32_value1 != crc32_value2:
-            return b''
-        if len(data) < self.IV_LENGTH:
             return b''
         if self.iv:
             iv = self.iv
         else:
+            if len(data) < self.IV_LENGTH:
+                return b''
             iv = data[:self.IV_LENGTH]
             data = data[self.IV_LENGTH:]
+            if self.saved_iv:
+                logger.debug("saved iv:%s" % iv)
+                self.iv = iv
         if not data:
             return b''
         data = self._decrypt(iv, data)
@@ -86,8 +101,13 @@ class BaseCipher(object):
             data = self._encrypt(self.iv, raw_data)
         else:
             iv = self.get_iv()
+            if self.saved_iv:
+                logger.debug("saved iv:%s" % iv)
+                self.iv = iv
             data = self._encrypt(iv, raw_data)
             data = iv + data
+        random_bytes = os.urandom(1)
+        data = random_bytes + data
         crc32_bytes = crc32(data).to_bytes(4, 'big')
         data = crc32_bytes + data
         if SPLIT_BYTES in data:
